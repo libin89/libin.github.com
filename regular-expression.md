@@ -1,4 +1,4 @@
-# 正则表达式：
+# 正则表达式（From _Mastering Regular Expressions_）
 ## 行的开始和结束
 ^ $匹配的是一个位置，而不是具体的文本
 ## 字符组[...]
