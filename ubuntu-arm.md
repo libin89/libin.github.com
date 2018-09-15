@@ -7,10 +7,10 @@
 
 ### face some issues in this work
 > **1. when startup to install ubuntu image, vbox has a error prompt diag.**
-* _Unable to load R3 module C:\Program Files\Oracle\VirtualBox/VBoxDD.DLL (VBoxDD): GetLastError=1790 (VERR_UNRESOLVED_ERROR)._
-* _E_FAIL   (0x80004005)_
-* _Console_
-* _IConsole   {8ab7c520-2442-4b66-8d74-4ff1e195d2b6}_
+`Unable to load R3 module C:\Program Files\Oracle\VirtualBox/VBoxDD.DLL (VBoxDD): GetLastError=1790 (VERR_UNRESOLVED_ERROR).`
+`E_FAIL   (0x80004005)`
+`Console`
+`IConsole   {8ab7c520-2442-4b66-8d74-4ff1e195d2b6}`
 * same to issue that the link shows: https://jingyan.baidu.com/article/ab69b270bb7b2a2ca6189f6d.html.
 * according to the link, we can replace uxtheme.dll(c:/windows/system32) with win7-64 orignal. file(https://pan.baidu.com/s/13VV-cyIKpT82Bt-VXKVoaw)
 > **2. when want to create share memory between host and virtual ubuntu system, need to install VBoxLinuxAdditions package. But installation Fail!**
