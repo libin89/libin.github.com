@@ -24,3 +24,19 @@
 * it will work after reboot system(sudo reboot).
 
 ## install crosstools for embedded development
+* 3 ways to build cross compile envirement.
+* can try first and second way to build it via following the link below:
+* https://blog.csdn.net/t17178351/article/details/72818174, i tried it. but not successful.
+* so at last, used third way to complete it.
+* the crosstools has beed made completely can be download at https://pan.baidu.com/s/1BTkuJEJen3jZzs7JqWQmhg.
+* also issue below, The problem has been solved, because I installed the amd64.iso linux system,so first must excuse apt-get install lsb-core,then you can excuse arm-linux-gcc -v
+* **sudo apt-get install lsb-core**
+> ~$ arm-none-linux-gnueabi-gcc -v
+> bash: /home/xxx/armlinux/tools/bin/arm-none-linux-gnueabi-gcc: No such file or directory
+* In addition, use "gcc -dM -E - < /dev/null" to show predefined macro.
+* usefull free web link:
+1. https://www.kernel.org/
+1. https://launchpad.net/gcc-arm-embedded/+download
+1. http://ftp.gnu.org/
+1. https://blog.csdn.net/iot_ai/article/details/62231622
+1. https://blog.csdn.net/victorwjw/article/details/72864770
