@@ -102,4 +102,87 @@
 * **NOTE, file ./bash提示需要解释器/lib/ld-linux.so.2!!!**
 * file ./bash输出：./bash: ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked, 
 * interpreter /lib/ld-linux.so.2, for GNU/Linux 2.6.32, BuildID[sha1]=e53f89d40c6b2cea5d74682160b3180327877d64, not stripped
+* Use 'readelf -d lib* | grep NEEDED' to find out the lib's despends.
 * 所以在根目录下创建/bin /lib目录下，选择vita系统后 正常进入了shell应用程序。
+
+### make initramfs
+* **config kernel to support initramfs**
+* make menuconfig: General setup->Initial RAM filesystem and RAM disk(initramfs/initrd) support
+* this item has a subitem 'Initramfs source file(s)',can be build into kernel special section .init.ramfs
+* also, usually, we don't link initramfs into kernel, but as a separated file that can be loaded into ram by bootloader.
+* **make simple initramfs**
+* if don't deliver 'rdinit' parameter to kernel, will execute initramfs/init after kernel bootup.
+* so we make /initramfs/init(shell script), and chmod a+x init
+* and we need mkdir bin lib in the initramfs directory.
+* finally, use 'find . | cpio -o -H newc | gzip -9 > /vita/boot/initrd.img'
+* change grub config: menuentry 'vita' { set root='(hd0,5)' linux /boot/bzImage root=/dev/sda5 ro initrd /boot/initrd.img }
+* **load device drivers by insmod modules**
+* modules.dep.bin/modules.dep record module despends information.
+* copy modules.dep.bin to corresponding directory, and we can use 'modprobe module-name' to insert module that despended modules will be loaded auto.
+* ... init shell script:
+` #!/bin/bash
+  echo "Hello Linux!"
+  export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+  mount -n -t devtmpfs udev /dev
+  mount -n -t proc proc /proc
+  mount -n -t sysfs sysfs /sys
+  exec /bin/sh
+ `
+ * ofcourse, we should make menuconfig for devtmpfs support
+ * Device Drivers->Generic Driver Options->Maintain a devtmpfs filesystem to mount at /dev
+
+### Auto loading modules ->page156
+
+* **build and install udev**
+* build and install udev-174.tar.gz
+* tar -zxvf udev-174.tar.gz
+*  ./configure --prefix=/usr/local --sysconfdir=/usr/local/etc --sbindir=/usr/local/sbin --libexecdir=/usr/local/lib/udev
+* --disable-hwdb --disable-introspection --disable-keymap --disable-gudev
+* make && make install
+* copy udevd, udevadm and relevant rules to initramfs
+* cp /usr/local/lib/udev/rules.d/80-drivers.rules initramfs/lib/udev/rules.d
+* ofcourse, libraries depended already was copied to initramfs before.
+
+* **config kernel to support NETLINK**
+* make menuconfig: Networking support->Networking options->Unix domain sockets
+
+* **config kernel to support inotify**
+* make menuconfig: File system->Inotify support for userspace
+
+* **install modules.alias.bin file**
+* cp lib/modules/3.7.4/modules.alias.bin initramfs/lib/modules/3.7.4
+* if not auto generate bin file, use 'depmod -b /vita/sysroot/ 3.7.4'
+* cp /usr/share/pci.ids initramfs/usr/share -->lspci
+
+*  **start udevd and coldplug**
+* modify initramfs/init to anolog hotplug
+* mount -n -t ramfs ramfs /run
+* udevd --daemon
+* udevadm trigger --action=add
+* udevadb settle
+* **this hotplug feature test fail, need to find out reason ...**
+
+
+## Mount and switch to root filesystem
+### Mount root filesystem
+* /proc/cmdline contain kernel bootargs that got from bootloader.
+* modify initramfs/init:
+* export ROOTMNT=/root
+* export ROFLAG=-r
+* for x in $(cat /proc/cmdline); do
+*     case $x in
+*     root=*)
+*	ROOT=${x#root=}
+*	;;
+*     ro)
+*	ROFLAG=-r
+*	;;
+*     rw)
+*	ROFLAG=-w
+*	;;
+*     esac
+* done
+* mount ${ROFLAG} ${ROOT} ${ROOTMNT}
+
+### Switch to root filesystem
+
