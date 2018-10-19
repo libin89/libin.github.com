@@ -167,22 +167,44 @@
 ### Mount root filesystem
 * /proc/cmdline contain kernel bootargs that got from bootloader.
 * modify initramfs/init:
-* export ROOTMNT=/root
-* export ROFLAG=-r
-* for x in $(cat /proc/cmdline); do
-*     case $x in
-*     root=*)
-*	ROOT=${x#root=}
-*	;;
-*     ro)
-*	ROFLAG=-r
-*	;;
-*     rw)
-*	ROFLAG=-w
-*	;;
-*     esac
-* done
-* mount ${ROFLAG} ${ROOT} ${ROOTMNT}
+` export ROOTMNT=/root
+ export ROFLAG=-r
+ for x in $(cat /proc/cmdline); do
+     case $x in
+     root=*)
+	ROOT=${x#root=}
+	;;
+     ro)
+	ROFLAG=-r
+	;;
+     rw)
+	ROFLAG=-w
+	;;
+     esac
+ done
+ mount ${ROFLAG} ${ROOT} ${ROOTMNT}`
 
 ### Switch to root filesystem
+* 真正的根文件系统已经挂载了，initramfs/init完成使命要退出了。
+* 系统的第一个进程应该使用根文件系统中的一个程序了，这里为了简化，使用/sbin/init（shell script）
+* #！/bin/bash\exec /bin/bash  -> chmod a+x init
+* 根文件系统准备好后，开始向根文件系统切换，步骤如下：
+
+1. 删除rootfs文件系统中不再需要的内容，释放内存空间
+> 现在挂载在“/”下的rootfs中的内容是initramfs解压来的，在我们准备把磁盘文件系统挂载到“/”前，需要删除rootfs内容，
+以释放占用的内存空间。但是删除前，需要：
+> 停止正在运行的进程，这里就是udevd；
+> 将/dev /run /proc和/sys目录移动到真正文件系统上。因此需要在根文件系统上建立如下目录：
+> mkdir sys proc dev run
+
+2. 将根文件系统从“/root”移动到“/”下。
+3. 更改进程的文件系统namespace，使其指向真正的根文件系统。因为当前进程就是进程1，而后续进程都是从进程1复制的，
+所以后续进程的文件系统的namespace自然就是使用的真正的根文件系统。
+4. 运行真正的文件系统中的“init”程序。
+
+* **这里有个问题，一旦步骤1执行了，rootfs中就没有内容了，后面的步骤中使用的命令已经不在了，被删除了，步骤2/3**
+* **就没有办法执行了，这里使用一个技巧，新增switch_root.c来完成2/3步骤。**
+* switch_root源码参看：https://github.com/libin89/libin.github.com/switch_root
+
+
 
