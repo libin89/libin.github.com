@@ -110,12 +110,14 @@
 * make menuconfig: General setup->Initial RAM filesystem and RAM disk(initramfs/initrd) support
 * this item has a subitem 'Initramfs source file(s)',can be build into kernel special section .init.ramfs
 * also, usually, we don't link initramfs into kernel, but as a separated file that can be loaded into ram by bootloader.
+
 * **make simple initramfs**
 * if don't deliver 'rdinit' parameter to kernel, will execute initramfs/init after kernel bootup.
 * so we make /initramfs/init(shell script), and chmod a+x init
 * and we need mkdir bin lib in the initramfs directory.
 * finally, use 'find . | cpio -o -H newc | gzip -9 > /vita/boot/initrd.img'
 * change grub config: menuentry 'vita' { set root='(hd0,5)' linux /boot/bzImage root=/dev/sda5 ro initrd /boot/initrd.img }
+
 * **load device drivers by insmod modules**
 * modules.dep.bin/modules.dep record module despends information.
 * copy modules.dep.bin to corresponding directory, and we can use 'modprobe module-name' to insert module that despended modules will be loaded auto.
@@ -131,17 +133,37 @@
  * ofcourse, we should make menuconfig for devtmpfs support
  * Device Drivers->Generic Driver Options->Maintain a devtmpfs filesystem to mount at /dev
 
-### Auto loading modules ->page156
+### Auto loading modules(实现热插拔hotplug/模拟热插拔coldplug)
+
+* **模块相关管理命令**
+* 安装加载/卸载等管理模块的工具，这些工具包kmod中：kmod-12.tar.xz
+* ./configure --prefix=/usr  && make  &&  make install
+* kmod是module-init-tools的替代者，但是kmod是向后兼容Module-init-tools的，虽然kmod只提供了一个工具kmod，但是通过符号链接的形式
+  支持module-init-tools中的各个命令，而且目前来看，也只能使用这种方式来使用各种模块管理命令。
+  ln -s kmod insmod && ln -s kmod rmmod && ln -s kmod modinfo && ln -s kmod lsmod && ln -s kmod modprobe && ln -s kmod depmod.
+* 将以上的命令及依赖的库添加到对应目录中。
+* 其中，insmod rmmod modprobe用于加载/卸载模块；modinfo查看模块信息；lsmod查看已经加载的模块；depmod用于创建模块间的依赖关系。
+* 注意，这里一定要将modprobe等命令放在/sbin目录下，因为后面的udevd将会使用“/sbin/modprobe”的形式调用modprobe命令。
+* 最新的合并到systemd中的udev不再直接调用Modprobe等工具，而是使用libkmod提供的库提供的API加载模块，但无本质区别。
+* 安装内核模块时，安装脚本已经调用depmod创建了modules.dep和使用Trie树组织的modules.dep.bin，需要将bin放到initramfs对应目录中。
+   modprobe会根据dep.bin自动加载模块所依赖的相关模块，可以通过lsmod来查看模块是否正确加载，但是lsmod时通过proc和sysfs获取内核
+   信息的，因此，为了使用lsmod，首先要挂载proc sysfs文件系统，为此要在initramfs根目录创建proc sys目录作为挂载点。
+
 
 * **build and install udev**
 * build and install udev-174.tar.gz
 * tar -zxvf udev-174.tar.gz
 *  ./configure --prefix=/usr/local --sysconfdir=/usr/local/etc --sbindir=/usr/local/sbin --libexecdir=/usr/local/lib/udev
 * --disable-hwdb --disable-introspection --disable-keymap --disable-gudev
-* make && make install
+> 这里安装udev时指定的路径很重要，由于这里路径都指定到了/usr/local目录下，所以这告诉安装脚本将udev的规则文件以及一些helper程序
+> 安装在/usr/local/lib/udev目录下，注意，这里默认路径一般是/lib/udev，后面的规则文件等一定要放在指定路径下，否则，会找不到文件，
+> 影响功能的实现。
+
+* **make && make install**
 * copy udevd, udevadm and relevant rules to initramfs
-* cp /usr/local/lib/udev/rules.d/80-drivers.rules initramfs/lib/udev/rules.d
+* cp /usr/local/lib/udev/rules.d/80-drivers.rules initramfs/usr/local/lib/udev/rules.d
 * ofcourse, libraries depended already was copied to initramfs before.
+> 注意！这里由于指定了/usr/local路径，所以80-drivers-rules要放到/usr/local/lib/udev/rules.d目录下。
 
 * **config kernel to support NETLINK**
 * make menuconfig: Networking support->Networking options->Unix domain sockets
@@ -151,8 +173,13 @@
 
 * **install modules.alias.bin file**
 * cp lib/modules/3.7.4/modules.alias.bin initramfs/lib/modules/3.7.4
+> 注意！这里的modules相关文件都可以在安装模块的路径下找到，编译安装模块命令：
+> make bzImage && make modules && make INSTALL_MOD_PATH=/vita/sysroot modules_install
 * if not auto generate bin file, use 'depmod -b /vita/sysroot/ 3.7.4'
 * cp /usr/share/pci.ids initramfs/usr/share -->lspci
+> 注意！ lspci命令会从pci.ids数据库中根据设备ID来查找对应的设备具体信息，如果没有显示具体信息，很可能是pci.ids路径不对，导致
+> 没有找到数据库，需要在/usr/share/misc /usr/share/hwdata 目录下都分别放一份pci.ids，我遇到的问题就是在/usr/share/misc下才会
+> 生效，其他目录不生效。
 
 *  **start udevd and coldplug**
 * modify initramfs/init to anolog hotplug
@@ -160,8 +187,14 @@
 * udevd --daemon
 * udevadm trigger --action=add
 * udevadb settle
-* **this hotplug feature test fail, need to find out reason ...**
+* **udev实现热插拔过程遇到的问题总结**
 
+1. lspci不能显示设备的具体描述信息，这是pci.ids路径不对，放在/usr/share/misc目录后ok，另外pci.ids可以在安装lspci的目录中找到
+1. udevd --daemon运行udevd后，执行udevadm control --log-priority=debug(默认是err,debug可以打开更多log用于调试udev相关问题)，
+   再执行udevadm trigger --action=add出现错误提示：udevd[119]: no db file to read /run/udev/data/+pci:0000:00:03.0: No such 
+   file or directory；这个问题根本原因还是上面说的，udev的安装路径是/usr/local，所以规则文件和udev配置文件udev.conf都要放到这
+   个路径下面，udev.conf一般不需要修改，默认就行。udevadm test /sys/devices/pci:0000:00:03.0/ 这个test命令很有用，这个命令让我
+   发现了规则文件路径的问题，后面基本可以再udev.conf中默认打开调试log：udev_log="debug"就可以了，有异常的话按提示的log去解决。
 
 ## Mount and switch to root filesystem
 ### Mount root filesystem
@@ -203,7 +236,7 @@
 4. 运行真正的文件系统中的“init”程序。
 
 * **这里有个问题，一旦步骤1执行了，rootfs中就没有内容了，后面的步骤中使用的命令已经不在了，被删除了，步骤2/3**
-* **就没有办法执行了，这里使用一个技巧，新增switch_root.c来完成2/3步骤。**
+就没有办法执行了，这里使用一个技巧，新增switch_root.c来完成2/3步骤。**
 * switch_root源码参看：https://github.com/libin89/libin.github.com/switch_root
 
 
