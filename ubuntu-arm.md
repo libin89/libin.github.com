@@ -239,5 +239,84 @@
     就没有办法执行了，这里使用一个技巧，新增switch_root.c来完成2/3步骤。**
 * switch_root源码参看：https://github.com/libin89/libin.github.com/switch_root
 
+## 构建根文件系统
+
+### 初始根文件系统
+* /sbin/init: #!/bin/bash export HOME=/root   exec /bin/bash -l; "-l" 是告诉bash以登录方式启动，这样可以使bash读取在
+  /etc/profile ~/.profile等文件中定义的环境变量。为了让shell提示符友好一些，在/etc/profile中加入 export PS1=
+  "\[\e[31;1m\]\u@vita:\[\e[35;1m\]\w# \[\e[0m\]"
+  
+### 以读写模式重新挂载文件系统
+* /sbin/init中加入 mount -o remount,rw /dev/sda5 /
+* cat /proc/mounts查看是否以读写挂载了，这个有个问题，"\u"显示“i have no name!”，使用whoami也是出现同样的显示；这里需要
+  在/etc/passwd文件中加入 root:x:0:0:root:/root:/bin/bash（passwd可以参考ubuntu系统里的对应文件），之后显示正确。
+  
+### 配置内核网络
+* **配置讷河支持TCP/IP协议**
+* make menuconfig: Networking support->Neworking options->TCP/IP networking
+
+* **配置内核支持网卡**
+* lspci查看以太网相关的设备，在总线好为0x00的PCI总线上，设备号0X03设备就是Intel的型号82540EM千兆以太网卡。
+* 根据内核通过sys文件系统报告的uevent事件，可以看到MODALIAS值pci:v00008086d0000100Esv00008086sd0000001Ebc02sc00i00，以设备ID
+“100E”在内核的drivers/net目录下搜索可以看到，我们需要配置内核支持e1000驱动
+* make menuconfig:Device Drivers->Network device support->Ethernet driver support(NEW)->Intel(R) PRO/1000 Gigbbit Ethernet  support(这个配置为M，动态加载模块)
+
+* **启动udev**
+`udevd --daemon 
+ udevadm trigger --action=add
+ udevadm settle
+`
+* 这个在initramfs时已经用过了，这个启动udev服务，这里不仅是加载网卡驱动，还是重新模拟hotplug，从根文件系统中加载相关设备的驱动
+模块；因为initramfs中往往只包含存储介质相关的驱动，而其他大量相关设备驱动还是保存在跟文件系统中的。
+
+### 安装网络配置工具并配置网络
+* 安装ip ping到根文件系统
+* ip link show查看网络接口状态，如果是“down”状态，使用ip link set eth0 up将接口状态设置为“up”
+* ip addr add 192.168.1.24/24 dev eth0 具体ip地址根据自身情况 与宿主机在一个网段上；设置ip后可以查看路由情况：ip route show
+* 最后使用ping命令确认网络是否成功配置
+
+### 安装并配置ssh服务
+1. 安装zlib-1.2.7.tar.bz2 ->./configure --prefix=/usr && make && make install
+1. 安装openssl-1.0.2p.tar.gz ->./config --prefix=/usr --openssldir=/etc/ssl && make &&
+	make install MANDIR=/usr/share/man INSTALL_PREFIX=/vita/sysroot
+1. 安装openssh-6.1p1.tar.gz ->LD=i686-linux-gnu-gcc ./configure --prefix=/usr --syconfdir=/etc/ssh --without-openssl-header-check &&
+	make install DESTDIR=/vita/sysroot
+
+> 在openssh的编译脚本中，调用链接器时传递了参数-fstack-protector-all。链接器不允许链接可执行文件时使用以“-f”开头的参数，以“-f”
+  开头的参数只能用于链接动态库。解决这个问题的方法之一就是避免直接调用链接器进行链接，而是通过gcc间接调用链接。这就是在配置
+  openssh时设定LD=i686-linux-gnu-gcc，覆盖系统环境变量中定义的LD=i686-linux-gnu-ldd的目的。
+  这个问题可能实在交叉编译环境下出现的，非交叉编译环境并没有出现。
+  
+* openssh支持一种安全机制，称为特权分离（Privilege Separation），这个机制是默认开启的。但是这个机制要求一些附加操作，比如建立
+  非特权用户等。为简单起见，我们关掉了这个机制。为了方便，我们允许SSH服务使用root用户登录。同样root密码设置为空：
+* /etc/ssh/sshd_config: UsePrivilegeSeparation no, PermitRootLogin yes, PermitEmptyPasswords yes
+* 除了配置ssh服务外，根据ssh协议2.0的要求，还需要为ssh服务创建dsa,rsa和ecdsa三种类型的密钥
+* 而创建密钥需要一些账户信息，因此，我们首先为系统添加账户信息：
+* 用户信息保存在文件/etc/passwd中，格式为：name:password:uid:gid:comment:home:shell
+* name是用户名，password是用户密码，uid是用户ID，gid是用户所属的组，comment保存如用户的真实姓名等信息，home是用户的属主目录，
+  shell是用户登录后执行的命令。
+* 组信息保存在文件/etc/group中，格式为：group_name:password:gid:usr_list
+* group_name是组名，password是组的密码，gid是组ID，user_list部分记录属于该组的所有用户（用户之间使用逗号分隔）。
+* 我们vita系统创建的具体的passwd和group文件分别如下：
+* /etc/passwd：root::0:0:/root:/bin/bash
+* /etc/group：root::0:
+
+* dsa,rsa和ecdsa三种类型的密钥(一路enter键)
+* ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key
+* ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key
+* ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key
+
+* 最后把/etc/ssh/*配置文件，/usr/bin/ssh*，/usr/sbin/sshd文件放入vita对应目录。
+
+* 从宿主系统远程登录vita系统时，vita系统需要为登录的用户分配伪终端（PTY），而伪终端设备节点建立在/dev/pts目录下，并且/dev/pts
+  要求挂载devpts文件系统。如果没有挂载devpts，登录失败，报错信息类似：PTY allocation request failed on channel 0
+* 为此，修改init程序，挂载devpts, 一切就绪，系统启动时，默认启动ssh服务：
+`mkdir /dev/pts
+ mount -n -t devpts devpts /dev/pts
+`
+`/usr/sbin/sshd`
+* **相关的安装源文件可以查看百度网盘：软件->linux_packages目录**
+
+### 安装X窗口系统
 
 
