@@ -10,4 +10,4 @@
 
 * ** ./automerge.sh is an example for using git tool **
 
-*
+* 
